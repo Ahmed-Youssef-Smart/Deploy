@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const AppDataSource = require("./db");
-const User = require("./user");
+const user = require("./user");
 const Note = require("./note");
 const { hashPassword, comparePasswords } = require("./hash");
 const authMiddleware = require("./middleware/auth.middleware");
@@ -31,28 +31,28 @@ app.post("/register", async (req, res) => {
             return res.status(400).json({ message: "Name, email, and password are required" });
         }
 
-        const userRepository = AppDataSource.getRepository(User);
+        const userRepository = AppDataSource.getRepository(user);
 
         // التحقق من وجود المستخدم مسبقاً
-        const existingUser = await userRepository.findOne({ where: { email } });
-        if (existingUser) {
+        const existinguser = await userRepository.findOne({ where: { email } });
+        if (existinguser) {
             return res.status(400).json({ message: "Email is already registered" });
         }
 
         // تشفير كلمة المرور
         const hashedPassword = await hashPassword(password);
 
-        const newUser = userRepository.create({
+        const newuser = userRepository.create({
             name,
             email,
             password: hashedPassword,
         });
 
-        const savedUser = await userRepository.save(newUser);
+        const saveduser = await userRepository.save(newuser);
 
         // لا نعيد كلمة المرور المشفرة في الاستجابة
-        const { password: _, ...userData } = savedUser;
-        res.status(201).json({ message: "User registered successfully", user: userData });
+        const { password: _, ...userData } = saveduser;
+        res.status(201).json({ message: "user registered successfully", user: userData });
     } catch (error) {
         res.status(500).json({ message: "Server error", error: error.message });
     }
@@ -67,7 +67,7 @@ app.post("/login", async (req, res) => {
             return res.status(400).json({ message: "Email and password are required" });
         }
 
-        const userRepository = AppDataSource.getRepository(User);
+        const userRepository = AppDataSource.getRepository(user);
         const user = await userRepository.findOne({ where: { email } });
 
         if (!user) {
@@ -96,7 +96,7 @@ app.post("/login", async (req, res) => {
 // 3. جلب بيانات المستخدم الحالي (Auth Me)
 app.get("/auth/me", authMiddleware, async (req, res) => {
     try {
-        const userRepository = AppDataSource.getRepository(User);
+        const userRepository = AppDataSource.getRepository(user);
         const user = await userRepository.findOne({
             where: { id: req.user.userId },
            // relations: ["notes"], // جلب الملاحظات المرتبطة بالمستخدم
@@ -106,7 +106,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
         });
 
         if (!user) {
-            return res.status(404).json({ message: "User not found" });
+            return res.status(404).json({ message: "user not found" });
         }
 
         const { password: _, ...userData } = user;
