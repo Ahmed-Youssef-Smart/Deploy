@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const AppDataSource = require("./db");
-const user = require("./user");
+const User = require("./user"); // استخدام الحرف الكبير لمنع تضارب المتغيرات
 const Note = require("./note");
 const { hashPassword, comparePasswords } = require("./hash");
 const authMiddleware = require("./middleware/auth.middleware");
@@ -10,8 +10,18 @@ const authMiddleware = require("./middleware/auth.middleware");
 const app = express();
 app.use(express.json());
 
-//const JWT_SECRET = process.env.JWT_SECRET || "in .env file";
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret_key";
+
+// دالة مساعدة لتسجيل الأخطاء بالتفصيل في الكونسول
+function logErrorDetails(req, error) {
+    console.error("\n==================== [ ERROR LOG ] ====================");
+    console.error(`🕒 الوقت: ${new Date().toISOString()}`);
+    console.error(`📍 المسار: [${req.method}] ${req.originalUrl}`);
+    console.error(`📦 الـ Body المرسل:`, JSON.stringify(req.body, null, 2));
+    console.error(`❌ رسالة الخطأ: ${error.message}`);
+    console.error(`🔍 مكان الخطأ بالتفصيل (Stack Trace):\n${error.stack}`);
+    console.error("========================================================\n");
+}
 
 // تهيئة الاتصال بقاعدة البيانات
 AppDataSource.initialize()
@@ -31,30 +41,32 @@ app.post("/register", async (req, res) => {
             return res.status(400).json({ message: "Name, email, and password are required" });
         }
 
-        const userRepository = AppDataSource.getRepository(user);
+        const userRepository = AppDataSource.getRepository(User);
 
-        // التحقق من وجود المستخدم مسبقاً
-        const existinguser = await userRepository.findOne({ where: { email } });
-        if (existinguser) {
+        const existingUser = await userRepository.findOne({ where: { email } });
+        if (existingUser) {
             return res.status(400).json({ message: "Email is already registered" });
         }
 
-        // تشفير كلمة المرور
         const hashedPassword = await hashPassword(password);
 
-        const newuser = userRepository.create({
+        const newUser = userRepository.create({
             name,
             email,
             password: hashedPassword,
         });
 
-        const saveduser = await userRepository.save(newuser);
+        const savedUser = await userRepository.save(newUser);
+        const { password: _, ...userData } = savedUser;
 
-        // لا نعيد كلمة المرور المشفرة في الاستجابة
-        const { password: _, ...userData } = saveduser;
-        res.status(201).json({ message: "user registered successfully", user: userData });
+        res.status(201).json({ message: "User registered successfully", user: userData });
     } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        logErrorDetails(req, error);
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message,
+            endpoint: `${req.method} ${req.originalUrl}` // لتوضيح المسار في الـ response أيضاً
+        });
     }
 });
 
@@ -67,58 +79,66 @@ app.post("/login", async (req, res) => {
             return res.status(400).json({ message: "Email and password are required" });
         }
 
-        const userRepository = AppDataSource.getRepository(user);
-        const user = await userRepository.findOne({ where: { email } });
+        const userRepository = AppDataSource.getRepository(User);
+        const foundUser = await userRepository.findOne({ where: { email } });
 
-        if (!user) {
+        if (!foundUser) {
             return res.status(401).json({ message: "Invalid email or password" });
         }
 
-        const isMatch = await comparePasswords(password, user.password);
+        const isMatch = await comparePasswords(password, foundUser.password);
         if (!isMatch) {
             return res.status(401).json({ message: "Invalid email or password" });
         }
 
-        // إنشاء رمز JWT
         const token = jwt.sign(
-            { userId: user.id, email: user.email },
+            { userId: foundUser.id, email: foundUser.email },
             JWT_SECRET,
             { expiresIn: "7d" }
         );
 
-        const { password: _, ...userData } = user;
+        const { password: _, ...userData } = foundUser;
         res.json({ message: "Login successful", token, user: userData });
     } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        logErrorDetails(req, error);
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message,
+            endpoint: `${req.method} ${req.originalUrl}`
+        });
     }
 });
 
 // 3. جلب بيانات المستخدم الحالي (Auth Me)
 app.get("/auth/me", authMiddleware, async (req, res) => {
     try {
-        const userRepository = AppDataSource.getRepository(user);
-        const user = await userRepository.findOne({
+        const userRepository = AppDataSource.getRepository(User);
+        const currentUser = await userRepository.findOne({
             where: { id: req.user.userId },
-           // relations: ["notes"], // جلب الملاحظات المرتبطة بالمستخدم
             relations: {
-            notes: true
-                        },
+                notes: true
+            },
         });
 
-        if (!user) {
-            return res.status(404).json({ message: "user not found" });
+        if (!currentUser) {
+            return res.status(404).json({ message: "User not found" });
         }
 
-        const { password: _, ...userData } = user;
+        const { password: _, ...userData } = currentUser;
         res.json(userData);
     } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        logErrorDetails(req, error);
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message,
+            endpoint: `${req.method} ${req.originalUrl}`
+        });
     }
 });
 
 // 4. مسارات الملاحظات (Notes CRUD)
 
-// إضافة ملاحظة جديدة للمستخدم المسجل
+// إضافة ملاحظة جديدة
 app.post("/notes", authMiddleware, async (req, res) => {
     try {
         const { title, content } = req.body;
@@ -136,7 +156,12 @@ app.post("/notes", authMiddleware, async (req, res) => {
         const savedNote = await noteRepository.save(newNote);
         res.status(201).json(savedNote);
     } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        logErrorDetails(req, error);
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message,
+            endpoint: `${req.method} ${req.originalUrl}`
+        });
     }
 });
 
@@ -149,7 +174,12 @@ app.get("/notes", authMiddleware, async (req, res) => {
         });
         res.json(notes);
     } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        logErrorDetails(req, error);
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message,
+            endpoint: `${req.method} ${req.originalUrl}`
+        });
     }
 });
 

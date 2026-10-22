@@ -10,7 +10,7 @@ const AppDataSource = new DataSource({
     username: process.env.DB_USER || "db75157",
     password: process.env.DB_PASSWORD || "Se7=@5Zj9m#P",
     database: process.env.DB_NAME || "db75157",
-    synchronize: true, // يفضل إيقافها في بيئة الإنتاج واستخدام migrations
+    synchronize: false, // يفضل إيقافها في بيئة الإنتاج واستخدام migrations
     logging: false,
     entities: [user, Note],
     ssl: {
